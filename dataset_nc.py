@@ -11,7 +11,7 @@ import tensor_transforms as tt
 import numpy as np
 import pandas as pd
 import xarray as xr
-
+from matplotlib import pyplot as plt
 
 
 # idx =  0
@@ -78,10 +78,10 @@ class FMoWSentinel2(Dataset):
         
         if index  == 0:
             hr2_t_idx = index
-        elif index < 6:
-            hr2_t_idx = torch.randint(1, index+1, (1,))[0]
+        elif index < 12:
+            hr2_t_idx = torch.randint(0, index, (1,))[0]
         else:
-            hr2_t_idx = torch.randint(1, index+1, (1,))[0]
+            hr2_t_idx = torch.randint(index - 12, index, (1,))[0]
         
         high2 = self.ds.isel(time = hr2_t_idx).copy()
         
@@ -103,6 +103,9 @@ class FMoWSentinel2(Dataset):
         return self.data_len    
 
 if __name__ == "__main__":
+    g = torch.Generator()
+    g.manual_seed(0)
+    
     enc_transform = transforms.Compose(
         [
             transforms.Resize((201,201), interpolation=transforms.InterpolationMode.BILINEAR, antialias = False),
@@ -121,8 +124,26 @@ if __name__ == "__main__":
     )
     dataset = FMoWSentinel2(nc_path = '../era_reanalysis/2020_01_hr.nc', transform = None, enc_transform=enc_transform, resolution=201, integer_values=False)
     train_dataloader = DataLoader(dataset, batch_size=64, shuffle=True)
-    for step, (high, low, high2) in enumerate(train_dataloader):
-        print(high.shape)
-        print(low.shape)
-        print(high2.shape)
-        break
+    # for step, (high, low, high2) in enumerate(train_dataloader):
+    #     print(high.shape)
+    #     print(low.shape)
+    #     print(high2.shape)
+    #     break
+    
+
+    # Display image and label.
+    high, low, high2 = next(iter(train_dataloader))
+    print(f"target_hr: {high.size()}")
+    print(f"target_lr: {low.size()}")
+    print(f"hr_t': {high2.size()}")
+    
+    target_hr_sample = high[0,0:3,:,:].squeeze()
+    target_lr_sample = low[0].squeeze()
+    hr_t_prime_sample = high2[0].squeeze()
+    
+    plt.imshow(hr_t_prime_sample[1,:,:], cmap=plt.cm.Blues)
+    plt.imshow(target_hr_sample[1,:,:], cmap=plt.cm.Blues)
+    plt.imshow(target_lr_sample[1,:,:], cmap=plt.cm.Blues)
+    
+    plt.show()
+    
