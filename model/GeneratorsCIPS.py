@@ -8,23 +8,23 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from .blocks import ConstantInput, LFF, StyledConv, ToRGB, PixelNorm, EqualLinear, StyledResBlock, ResBlock, ToRGBNoMod, EqualConv2d, StyledConvNoNoise, ConvLayer, Self_Attn, ConstantInputPatch
+from .blocks import ConstantInput, LFF, StyledConv, ToRGB, ToDataChannel, PixelNorm, EqualLinear, StyledResBlock, ResBlock, ToRGBNoMod, EqualConv2d, StyledConvNoNoise, ConvLayer, Self_Attn, ConstantInputPatch
 
 
 class CIPSAtt(nn.Module):
     def __init__(self, size=256, hidden_size=512, n_mlp=8, style_dim=512, lr_mlp=0.01,
-                 activation=None, linear_size = 512, channel_multiplier=2, coord_size = 3, **kwargs):
+                 activation=None, linear_size = 512, channel_multiplier=2, coord_size = 3, data_channels = 3,**kwargs):
         super(CIPSAtt, self).__init__()
-
-        self.size = size
+        self.data_channels = int(data_channels)
+        self.size = size #H,W
         demodulate = True
         self.demodulate = demodulate
-        self.coord_size = coord_size
-        self.lff = LFF(hidden_size, coord_size = coord_size)
-        self.emb = ConstantInput(hidden_size, size=size)
+        self.coord_size = coord_size #x,y,t 
+        self.lff = LFF(hidden_size, coord_size = coord_size) #linear feed forward with sin activation for e_f0(x,y,t) with dim(3,512)
+        self.emb = ConstantInput(hidden_size, size=size)#e_c0 with dim(512,H,W)
+        #hidden_size = C_fea
 
-
-        self.channels = {
+        self.channels = { #similar to ProGan
             0: linear_size,
             1: linear_size,
             2: linear_size,
@@ -38,9 +38,9 @@ class CIPSAtt(nn.Module):
 
         multiplier = 2
         in_channels = int(self.channels[0])
-        self.project1 = ConvLayer(6, in_channels, 3, downsample = True)
-        self.project2 = ConvLayer(in_channels, in_channels, 3, downsample = True)
-        self.att = Self_Attn(in_channels, "relu")
+        self.project1 = ConvLayer(2 * self.data_channels, in_channels, 3, downsample = True) #6 here has to change to 2C which is 4 in 2 channel config
+        self.project2 = ConvLayer(in_channels, in_channels, 3, downsample = True) #does upfirdn2d
+        self.att = Self_Attn(in_channels, "relu") #FA
         self.up_project1 = ConvLayer(in_channels, in_channels, 3, upsample = True)
         self.up_project2 = ConvLayer(in_channels, in_channels, 3, upsample = True)
         self.conv1 = StyledConv(int(multiplier*hidden_size), in_channels, 1, style_dim, demodulate=demodulate,
@@ -58,8 +58,9 @@ class CIPSAtt(nn.Module):
                                            demodulate=demodulate, activation=activation))
             self.linears.append(StyledConv(out_channels, out_channels, 1, style_dim,
                                            demodulate=demodulate, activation=activation))
-            self.to_rgbs.append(ToRGB(out_channels, style_dim, upsample=False))
-
+            #self.to_rgbs.append(ToRGB(out_channels, style_dim, upsample=False)) #ToRGB has to customize the out_channel of weight and bias 
+            self.to_rgbs.append(ToDataChannel(out_channels, self.data_channels, style_dim, upsample=False))
+            
             in_channels = out_channels
 
         self.style_dim = style_dim

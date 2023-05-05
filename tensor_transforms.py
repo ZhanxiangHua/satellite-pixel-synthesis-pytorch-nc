@@ -27,7 +27,7 @@ def convert_to_coord_with_t(b, h, w, ts, device='cpu', integer_values=False):
         coords[t] = torch.cat((x_channel, y_channel, t_channel), dim=1).squeeze(0)
     return coords
 
-def convert_to_coord_uneven_t(b, h, w, t, unit = 365, sin = False, device='cpu', integer_values=False):
+def convert_to_coord_uneven_t(b, h, w, t, unit = 24, sin = False, device='cpu', integer_values=False):
     if integer_values:
         x_channel = torch.arange(w, dtype=torch.float, device=device).view(1, 1, 1, -1).repeat(b, 1, w, 1)
         y_channel = torch.arange(h, dtype=torch.float, device=device).view(1, 1, -1, 1).repeat(b, 1, 1, h)

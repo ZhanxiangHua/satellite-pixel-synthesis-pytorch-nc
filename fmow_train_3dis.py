@@ -3,6 +3,8 @@ import math
 import random
 import os
 from PIL import Image
+from matplotlib import pyplot as plt
+import pathlib
 
 import numpy as np
 import torch
@@ -16,10 +18,18 @@ from tqdm import tqdm
 
 import model
 from model.loss import SSIM
-from dataset import FMoWSentinel2
+from dataset_nc import FMoWSentinel2
 from distributed import get_rank, synchronize, reduce_loss_dict
 from tensor_transforms import convert_to_coord_format
 import torchvision.models as models
+
+def save_single_channel_visual(batch_data, nrow, channel, save_path, save_name):
+    grid_img = utils.make_grid(batch_data, nrow=nrow)
+    cmap = plt.cm.coolwarm
+    norm = plt.Normalize(vmin=-4, vmax=4)
+    image = cmap(norm(grid_img[channel,:,:].cpu()))
+    pathlib.Path(save_path).mkdir(parents=True, exist_ok=True)
+    plt.imsave(os.path.join(save_path, save_name), image)
 
 
 def data_sampler(dataset, shuffle, distributed):
@@ -97,7 +107,7 @@ def mixing_noise(batch, latent_dim, prob, device):
         return [make_noise(batch, latent_dim, 1, device)]
 
 
-def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, test_data, device):
+def train(args, loader, input_data_channels, generator, discriminator, g_optim, d_optim, g_ema, test_data, device):
 #     requires_grad(encoder, False)
     loader = sample_data(loader)
 
@@ -139,12 +149,12 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, test_
         # data = next(loader)
         # key = np.random.randint(n_scales)
         # real_stack = data[key].to(device)
-        highres, lowres_img, highres_img2 = next(loader)
+        highres, lowres_img, highres_img2, high_norm_param, high2_norm_param = next(loader)
         highres = highres.to(device)
         lowres_img = lowres_img.to(device)
         highres_img2 = highres_img2.to(device)
 
-        real_img, converted = highres[:, :3], highres[:, 3:]
+        real_img, converted = highres[:, :input_data_channels], highres[:, input_data_channels:]
 
         # Training Discriminator
         requires_grad(generator, False)
@@ -198,7 +208,7 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, test_
         fake_input_g = torch.cat((fake, lowres_img, highres_img2), 1)
         fake_pred = discriminator(fake_input_g)
         g_gan_loss = g_nonsaturating_loss(fake_pred)
-        real_img = highres[:, :3]
+        real_img = highres[:, :input_data_channels]
         rec_loss = g_rec_loss(fake_img, real_img)
         ssim_loss = 1.0 - ssim(fake_img, real_img)
         g_loss = g_gan_loss + args.l1_lambda*rec_loss + args.ssim_lambda*ssim_loss
@@ -254,55 +264,81 @@ def train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, test_
                 with torch.no_grad():
                     g_ema.eval()
 
-                    highres, lowres_img, highres_img2 = test_data
+                    highres, lowres_img, highres_img2, high_norm_param, high2_norm_param = test_data
                     highres = highres.to(device)
                     lowres_img = lowres_img.to(device)
                     highres_img2 = highres_img2.to(device)
 
-                    real_img, converted = highres[:, :3], highres[:, 3:]
+                    real_img, converted = highres[:, :input_data_channels], highres[:, input_data_channels:]
 
                     sample, _ = g_ema(converted, lowres_img, highres_img2, [sample_z])
-
-                    utils.save_image(
-                        sample,
-                        os.path.join(path, 'outputs', args.output_dir, 'images', f'{str(i).zfill(6)}.png'),
-                        nrow=int(args.n_sample ** 0.5),
-                        normalize=True,
-                        range=(-1, 1),
-                    )
+                    #here need to separate the channels in sample
+                    
+                    save_single_channel_visual(sample,
+                                               nrow = int(args.n_sample ** 0.5), 
+                                               channel = 0, 
+                                               save_path = os.path.join(path, 'outputs', args.output_dir, 'images'),
+                                               save_name = f'{str(i).zfill(6)}.png'
+                                               )
+                                 
+                    # utils.save_image(
+                    #     sample,
+                    #     os.path.join(path, 'outputs', args.output_dir, 'images', f'{str(i).zfill(6)}.png'),
+                    #     nrow=int(args.n_sample ** 0.5),
+                    #     normalize=True,
+                    #     range=(-1, 1),
+                    # )
 
                     if i == 0:
 #                         lowres_img = torch.nn.functional.interpolate(lowres_img, (10, 10))
 #                         lowres_img = torch.nn.functional.interpolate(lowres_img, (args.size, args.size))
-                        utils.save_image(
-                            lowres_img,
-                            os.path.join(
-                                path,
-                                f'outputs/{args.output_dir}/images/lowres.png'),
-                            nrow=int(fake_img.size(0) ** 0.5),
-                            normalize=True,
-                            range=(-1, 1),
-                        )
 
-                        utils.save_image(
-                            highres_img2,
-                            os.path.join(
-                                path,
-                                f'outputs/{args.output_dir}/images/highres2.png'),
-                            nrow=int(highres_img2.size(0) ** 0.5),
-                            normalize=True,
-                            range=(-1, 1),
-                        )
+                        save_single_channel_visual(lowres_img,
+                                                nrow = int(fake_img.size(0) ** 0.5), 
+                                                channel = 0, 
+                                                save_path = os.path.join(path, 'outputs', args.output_dir, 'images'),
+                                                save_name = 'lowres.png'
+                                                )
+                        # utils.save_image(
+                        #     lowres_img,
+                        #     os.path.join(
+                        #         path,
+                        #         f'outputs/{args.output_dir}/images/lowres.png'),
+                        #     nrow=int(fake_img.size(0) ** 0.5),
+                        #     normalize=True,
+                        #     range=(-1, 1),
+                        # )
 
-                        utils.save_image(
-                            real_img,
-                            os.path.join(
-                                path,
-                                f'outputs/{args.output_dir}/images/real_patch.png'),
-                            nrow=int(real_img.size(0) ** 0.5),
-                            normalize=True,
-                            range=(-1, 1),
-                        )
+                        save_single_channel_visual(highres_img2,
+                                                nrow = int(highres_img2.size(0) ** 0.5), 
+                                                channel = 0, 
+                                                save_path = os.path.join(path, 'outputs', args.output_dir, 'images'),
+                                                save_name = 'highres2.png'
+                                                )
+                        # utils.save_image(
+                        #     highres_img2,
+                        #     os.path.join(
+                        #         path,
+                        #         f'outputs/{args.output_dir}/images/highres2.png'),
+                        #     nrow=int(highres_img2.size(0) ** 0.5),
+                        #     normalize=True,
+                        #     range=(-1, 1),
+                        # )
+                        save_single_channel_visual(real_img,
+                                                nrow = int(real_img.size(0) ** 0.5), 
+                                                channel = 0, 
+                                                save_path = os.path.join(path, 'outputs', args.output_dir, 'images'),
+                                                save_name = 'real_patch.png'
+                                                )
+                        # utils.save_image(
+                        #     real_img,
+                        #     os.path.join(
+                        #         path,
+                        #         f'outputs/{args.output_dir}/images/real_patch.png'),
+                        #     nrow=int(real_img.size(0) ** 0.5),
+                        #     normalize=True,
+                        #     range=(-1, 1),
+                        # )
 
             if i % args.save_checkpoint_frequency == 0:
                 torch.save(
@@ -349,14 +385,16 @@ if __name__ == '__main__':
     parser.add_argument('--l1_lambda', type=float, default=100)
     parser.add_argument('--ssim_lambda', type=float, default=0)
     parser.add_argument('--save_checkpoint_frequency', type=int, default=2000)
-
+    #parser.add_argument('--input_data_channels', type=float, default=3)
+    parser.add_argument('--selected_RC_resolution', type=int, default=128)
+    parser.add_argument('--selected_vars', default=['U','V'])
     # dataset
-    parser.add_argument('--batch', type=int, default=4)
+    parser.add_argument('--batch', type=int, default=8)
     parser.add_argument('--num_workers', type=int, default=16)
     parser.add_argument('--to_crop', action='store_true')
     parser.add_argument('--crop', type=int, default=256)
     parser.add_argument('--coords_size', type=int, default=256)
-    parser.add_argument('--enc_res', type=int, default=224)
+    parser.add_argument('--enc_res', type=int, default=256)
 
     # Generator params
     parser.add_argument('--Generator', type=str, default='CIPSAtt')
@@ -370,6 +408,7 @@ if __name__ == '__main__':
     parser.add_argument('--mixing', type=float, default=0.)
     parser.add_argument('--g_reg_every', type=int, default=4)
     parser.add_argument('--n_mlp', type=int, default=3)
+    parser.add_argument('--data_channels', type=int, default=2)
 
 
     # Discriminator params
@@ -381,6 +420,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     path = args.out_path
+    path = '/mnt/h/outputs'
 
     Generator = getattr(model, args.Generator)
     print('Generator', Generator)
@@ -404,15 +444,15 @@ if __name__ == '__main__':
         torch.distributed.init_process_group(backend='nccl', init_method='env://')
         synchronize()
 
-#     args.n_mlp = 3
-    args.dis_input_size = 9 if args.img2dis else 12
+#   args.n_mlp = 3
+    args.dis_input_size = args.data_channels*3 if args.img2dis else args.data_channels*3 + 3
     print('img2dis', args.img2dis, 'dis_input_size', args.dis_input_size)
 
     args.start_iter = 0
     n_scales = int(math.log(args.size//args.crop, 2)) + 1
     print('n_scales', n_scales)
 
-    generator = Generator(size=args.size, hidden_size=args.fc_dim, style_dim=args.latent, n_mlp=args.n_mlp,
+    generator = Generator(size=args.size, hidden_size=args.fc_dim, style_dim=args.latent, n_mlp=args.n_mlp, data_channels = args.data_channels,
                           activation=args.activation, linear_size = args.linear_dim, channel_multiplier=args.channel_multiplier,
                           ).to(device)
 
@@ -421,7 +461,7 @@ if __name__ == '__main__':
         size=args.crop, channel_multiplier=args.channel_multiplier, n_scales=n_scales, input_size=args.dis_input_size,
         n_first_layers=args.n_first_layers,
     ).to(device)
-    g_ema = Generator(size=args.size, hidden_size=args.fc_dim, style_dim=args.latent, n_mlp=args.n_mlp,
+    g_ema = Generator(size=args.size, hidden_size=args.fc_dim, style_dim=args.latent, n_mlp=args.n_mlp, data_channels = args.data_channels,
                       activation=args.activation, linear_size = args.linear_dim, channel_multiplier=args.channel_multiplier,
                       ).to(device)
     g_ema.eval()
@@ -491,21 +531,21 @@ if __name__ == '__main__':
 
     enc_transform = transforms.Compose(
         [
-            # transforms.Resize(256),
+            # transforms.Resize(201),
             # transforms.ToTensor(),
             # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True),
-            transforms.Resize((256,256), interpolation=Image.NEAREST),
-            transforms.CenterCrop(256),
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True),
+            transforms.Resize(256, interpolation=transforms.InterpolationMode.BILINEAR, antialias = False),
+            #transforms.CenterCrop(201),
+            #transforms.ToTensor(),
+            #transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True),
         ]
     )
     transform = transforms.Compose(
         [
-            transforms.Resize((256,256)),
-            transforms.CenterCrop(256),
-            transforms.ToTensor(),
-            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True),
+            transforms.Resize(256, interpolation=transforms.InterpolationMode.BILINEAR, antialias = False),
+            # transforms.CenterCrop(201),
+            # transforms.ToTensor(),
+            # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True),
         ]
     )
     # transform_fid = transforms.Compose([
@@ -513,10 +553,26 @@ if __name__ == '__main__':
     #                                    transforms.Lambda(lambda x: x.mul_(255.).byte())])
     # dataset = MultiScaleDataset(args.path, transform=transform, resolution=args.coords_size, crop_size=args.crop,
     #                             integer_values=args.coords_integer_values, to_crop=args.to_crop)
-    dataset = FMoWSentinel2(args.path, transform=transform, enc_transform=enc_transform,
-                                    resolution=args.coords_size, integer_values=args.coords_integer_values)
-    testset = FMoWSentinel2(args.test_path, transform=transform, enc_transform=enc_transform,
-                                    resolution=args.coords_size, integer_values=args.coords_integer_values)
+    g = torch.Generator()
+    g.manual_seed(0)
+    
+    # dataset = FMoWSentinel2(args.path, transform=None, enc_transform=enc_transform,
+    #                                 resolution=args.coords_size, integer_values=args.coords_integer_values)
+    # testset = FMoWSentinel2(args.test_path, transform=None, enc_transform=enc_transform,
+    #                                 resolution=args.coords_size, integer_values=args.coords_integer_values)
+    
+    args.path = '/mnt/h/era_reanalysis/2020_01_hr.nc'
+    args.selected_RC_resolution = 128
+    args.selected_vars = ['U','V']
+    
+    dataset = FMoWSentinel2(nc_path = args.path, variables = args.selected_vars, transform = transform, enc_transform = enc_transform, 
+                            resolution = args.coords_size, integer_values=False)
+    
+    args.test_path = '/mnt/h/era_reanalysis/2020_01_hr.nc'
+    testset = FMoWSentinel2(nc_path = args.test_path, variables = args.selected_vars, transform = transform, enc_transform = enc_transform, 
+                            resolution = args.coords_size, integer_values=False)    
+    
+    
     # fid_dataset = ImageDataset(args.path, transform=transform_fid, resolution=args.coords_size, to_crop=args.to_crop)
     # fid_dataset.length = args.fid_samples
     loader = data.DataLoader(
@@ -526,6 +582,7 @@ if __name__ == '__main__':
         drop_last=True,
         num_workers=args.num_workers,
         pin_memory=True,
+        generator=g
     )
 
     test_loader = data.DataLoader(
@@ -535,13 +592,15 @@ if __name__ == '__main__':
         drop_last=True,
         num_workers=args.num_workers,
         pin_memory=False,
+        generator=g
     )
 
-    test_data = iter(test_loader).next()
+    test_data = next(iter(test_loader))
     del testset
     del test_loader
-#     print(test_data[0].shape)
+#   print(test_data[0].shape)
 
     writer = SummaryWriter(log_dir=args.logdir)
 
-    train(args, loader, generator, discriminator, g_optim, d_optim, g_ema, test_data, device)
+    input_data_channels = len(args.selected_vars)
+    train(args, loader, input_data_channels, generator, discriminator, g_optim, d_optim, g_ema, test_data, device)

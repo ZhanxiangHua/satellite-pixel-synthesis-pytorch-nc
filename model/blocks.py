@@ -358,7 +358,29 @@ class StyledConv(nn.Module):
         out = self.activate(out)
 
         return out
+    
+class ToDataChannel(nn.Module):
+    def __init__(self, in_channel, data_channels, style_dim, upsample=True, blur_kernel=[1, 3, 3, 1]):
+        super().__init__()
 
+        self.upsample = upsample
+        if upsample:
+            self.upsample = Upsample(blur_kernel)
+
+        self.conv = ModulatedConv2d(in_channel, data_channels, 1, style_dim, demodulate=False)
+        self.bias = nn.Parameter(torch.zeros(1, data_channels, 1, 1))
+
+    def forward(self, input, style, skip=None):
+        out = self.conv(input, style)
+        out = out + self.bias
+
+        if skip is not None:
+            if self.upsample:
+                skip = self.upsample(skip)
+
+            out = out + skip
+
+        return out
 
 class ToRGB(nn.Module):
     def __init__(self, in_channel, style_dim, upsample=True, blur_kernel=[1, 3, 3, 1]):
