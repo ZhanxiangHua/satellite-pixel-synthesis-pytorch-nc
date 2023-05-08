@@ -420,7 +420,11 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     path = args.out_path
-    path = '/mnt/h/outputs'
+    path = '/mnt/h/outputs2'
+    args.path = '/mnt/h/era_reanalysis/2020_01_hr.nc' #training data dir
+    args.test_path = '/mnt/h/era_reanalysis/2021_01_hr.nc' #testing data dir
+    args.selected_vars = ['U','V']
+    
 
     Generator = getattr(model, args.Generator)
     print('Generator', Generator)
@@ -561,14 +565,11 @@ if __name__ == '__main__':
     # testset = FMoWSentinel2(args.test_path, transform=None, enc_transform=enc_transform,
     #                                 resolution=args.coords_size, integer_values=args.coords_integer_values)
     
-    args.path = '/mnt/h/era_reanalysis/2020_01_hr.nc'
-    args.selected_RC_resolution = 128
-    args.selected_vars = ['U','V']
     
     dataset = FMoWSentinel2(nc_path = args.path, variables = args.selected_vars, transform = transform, enc_transform = enc_transform, 
                             resolution = args.coords_size, integer_values=False)
     
-    args.test_path = '/mnt/h/era_reanalysis/2020_01_hr.nc'
+    
     testset = FMoWSentinel2(nc_path = args.test_path, variables = args.selected_vars, transform = transform, enc_transform = enc_transform, 
                             resolution = args.coords_size, integer_values=False)    
     
@@ -595,7 +596,11 @@ if __name__ == '__main__':
         generator=g
     )
 
-    test_data = next(iter(test_loader))
+    test_iter = iter(test_loader)
+    test_data = next(test_iter)
+    test_data = next(test_iter)
+    test_data = next(test_iter)
+    
     del testset
     del test_loader
 #   print(test_data[0].shape)
