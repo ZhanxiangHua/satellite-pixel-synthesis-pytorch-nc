@@ -13,9 +13,10 @@ from torch.nn import functional as F
 from torch.utils import data
 import torch.distributed as dist
 from torchvision import transforms, utils
+from torchmetrics import PeakSignalNoiseRatio
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-
+#tensorboard --logdir /mnt/h/outputs3/tensorboard/fmow_test --port=6007
 import model
 from model.loss import SSIM
 from dataset_nc import FMoWSentinel2
@@ -272,6 +273,15 @@ def train(args, loader, input_data_channels, generator, discriminator, g_optim, 
                     real_img, converted = highres[:, :input_data_channels], highres[:, input_data_channels:]
 
                     sample, _ = g_ema(converted, lowres_img, highres_img2, [sample_z])
+                    
+                    #record l1_loss and psnr
+                    l1 = nn.L1Loss(reduction='mean')
+                    loss_sample = l1(sample, real_img).item()
+                    # calculate psnr
+                    psnr = PeakSignalNoiseRatio().to(device)
+                    psnr_score_sample = psnr(sample, real_img).item()
+                    writer.add_scalar("L1Loss test reference", loss_sample, i)
+                    writer.add_scalar("PSNR test reference", psnr_score_sample, i)
                     #here need to separate the channels in sample
                     
                     save_single_channel_visual(sample,
@@ -292,7 +302,10 @@ def train(args, loader, input_data_channels, generator, discriminator, g_optim, 
                     if i == 0:
 #                         lowres_img = torch.nn.functional.interpolate(lowres_img, (10, 10))
 #                         lowres_img = torch.nn.functional.interpolate(lowres_img, (args.size, args.size))
-
+                        loss_lr = l1(lowres_img, real_img).item()
+                        psnr_lr = psnr(lowres_img, real_img).item()
+                        print(f'baseline_l1_loss = {round(loss_lr,5)}\nbaseline_psnr = {round(psnr_lr,3)}')
+                        
                         save_single_channel_visual(lowres_img,
                                                 nrow = int(fake_img.size(0) ** 0.5), 
                                                 channel = 0, 
@@ -366,6 +379,7 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
 
+    parser.add_argument('--train_test_dir', type=str, default="")
     parser.add_argument('--path', type=str, default="")
     parser.add_argument('--test_path', type=str, default="")
     parser.add_argument('--output_dir', type=str, default="fmow_test")
@@ -386,7 +400,6 @@ if __name__ == '__main__':
     parser.add_argument('--ssim_lambda', type=float, default=0)
     parser.add_argument('--save_checkpoint_frequency', type=int, default=2000)
     #parser.add_argument('--input_data_channels', type=float, default=3)
-    parser.add_argument('--selected_RC_resolution', type=int, default=128)
     parser.add_argument('--selected_vars', default=['U','V'])
     # dataset
     parser.add_argument('--batch', type=int, default=8)
@@ -418,14 +431,14 @@ if __name__ == '__main__':
     parser.add_argument('--img2dis',  action='store_true')
     parser.add_argument('--n_first_layers', type=int, default=0)
 
+    ### manually set args ###
     args = parser.parse_args()
     path = args.out_path
-    path = '/mnt/h/outputs2'
-    args.path = '/mnt/h/era_reanalysis/2020_01_hr.nc' #training data dir
-    args.test_path = '/mnt/h/era_reanalysis/2021_01_hr.nc' #testing data dir
+    path = '/mnt/h/outputs3'
+    args.train_test_dir = '/mnt/h/era_reanalysis/'
     args.selected_vars = ['U','V']
+    args.ckpt = '/mnt/h/outputs3/outputs/fmow_test/checkpoints/076000.pt'
     
-
     Generator = getattr(model, args.Generator)
     print('Generator', Generator)
     Discriminator = getattr(model, args.Discriminator)
@@ -538,7 +551,7 @@ if __name__ == '__main__':
             # transforms.Resize(201),
             # transforms.ToTensor(),
             # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True),
-            transforms.Resize(256, interpolation=transforms.InterpolationMode.BILINEAR, antialias = False),
+            transforms.Resize(256, interpolation=transforms.InterpolationMode.BICUBIC, antialias = False),
             #transforms.CenterCrop(201),
             #transforms.ToTensor(),
             #transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True),
@@ -546,7 +559,7 @@ if __name__ == '__main__':
     )
     transform = transforms.Compose(
         [
-            transforms.Resize(256, interpolation=transforms.InterpolationMode.BILINEAR, antialias = False),
+            transforms.Resize(256, interpolation=transforms.InterpolationMode.BICUBIC, antialias = False),
             # transforms.CenterCrop(201),
             # transforms.ToTensor(),
             # transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True),
@@ -566,11 +579,11 @@ if __name__ == '__main__':
     #                                 resolution=args.coords_size, integer_values=args.coords_integer_values)
     
     
-    dataset = FMoWSentinel2(nc_path = args.path, variables = args.selected_vars, transform = transform, enc_transform = enc_transform, 
+    dataset = FMoWSentinel2(is_train = True, folder_path = args.train_test_dir, variables = args.selected_vars, transform = transform, enc_transform = enc_transform, 
                             resolution = args.coords_size, integer_values=False)
     
     
-    testset = FMoWSentinel2(nc_path = args.test_path, variables = args.selected_vars, transform = transform, enc_transform = enc_transform, 
+    testset = FMoWSentinel2(is_train = False, folder_path = args.train_test_dir, variables = args.selected_vars, transform = transform, enc_transform = enc_transform, 
                             resolution = args.coords_size, integer_values=False)    
     
     
