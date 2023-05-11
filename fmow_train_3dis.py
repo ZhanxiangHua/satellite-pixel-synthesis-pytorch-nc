@@ -437,7 +437,7 @@ if __name__ == '__main__':
     path = '/mnt/h/outputs3'
     args.train_test_dir = '/mnt/h/era_reanalysis/'
     args.selected_vars = ['U','V']
-    args.ckpt = '/mnt/h/outputs3/outputs/fmow_test/checkpoints/076000.pt'
+    args.ckpt = '/mnt/h/outputs3/outputs/fmow_test/checkpoints/118000.pt'
     
     Generator = getattr(model, args.Generator)
     print('Generator', Generator)

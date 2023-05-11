@@ -70,7 +70,7 @@ class RC(transforms.RandomCrop):
 
 
 class FMoWSentinel2(Dataset):
-    def __init__(self, is_train = True, folder_path = '/mnt/h/era_reanalysis/', variables = None, transform = None, enc_transform = None, resolution = None, integer_values = None):
+    def __init__(self, is_train = None, folder_path = '/mnt/h/era_reanalysis/', variables = None, transform = None, enc_transform = None, resolution = None, integer_values = None):
         """
         Args:
             folder_path (string): path to nc file
@@ -83,6 +83,7 @@ class FMoWSentinel2(Dataset):
         self.data_channels = len(variables)
         self.integer_values = integer_values
         self.resolution = resolution
+        self.time_lag = 6
         # Transforms
         self.transform = transform
         self.enc_transform = enc_transform
@@ -111,6 +112,11 @@ class FMoWSentinel2(Dataset):
         #date_anchor = pd.to_datetime("2020-01-15 12:00:00")
         t_stamp = pd.to_datetime(self.hr_ds_standardized_hourly['time'].isel(time = index).values)
         #t = (t_stamp - date_anchor)/pd.to_timedelta(1, unit='D')
+        ## to do: implement additional check for start date: if date starts before 01/05, we should limit the data to learn only after 01/01 of current year. ##
+        get_hour = t_stamp.hour
+        get_current_day = t_stamp.day
+        if (get_current_day == 1) & (get_hour < self.time_lag): #avoid sampling of time before the start of the month
+             return self.__getitem__(index + self.time_lag)        
         
         high =  self.hr_ds_standardized_hourly.isel(time = index)
         low = self.lr_ds_standardized_hourly.isel(time = index)
@@ -118,10 +124,10 @@ class FMoWSentinel2(Dataset):
         
         if index  == 0:
             hr2_t_idx = index
-        elif index < 6:
+        elif index < self.time_lag:
             hr2_t_idx = torch.randint(0, index, (1,))[0]
         else:
-            hr2_t_idx = torch.randint(index - 6, index, (1,))[0]
+            hr2_t_idx = torch.randint(index - self.time_lag, index, (1,))[0]
         
         high2 = self.hr_ds_standardized_hourly.isel(time = hr2_t_idx).copy()
         
